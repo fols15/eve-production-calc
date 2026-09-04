@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EVE Production Calculator</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="topbar">
+  <span class="topbar-title">PRODUCTION</span>
+  <div class="topbar-right">
+    <button id="scanToggleBtn" class="topbar-btn">💰 Поиск по прибыли</button>
+    <button id="lpToggleBtn" class="topbar-btn">🎖️ LP-магазины</button>
+    <button id="structuresToggleBtn" class="topbar-btn">🏗️ Мои структуры</button>
+    <span class="topbar-station">Jita IV - Moon 4 - Caldari Navy Assembly Plant</span>
+  </div>
+</div>
+
+<div id="scanPanel" class="structures-panel hidden">
+  <div class="structures-panel-inner">
+    <section>
+      <h2>Найти лучший предмет для производства по прибыли</h2>
+      <p class="hint">
+        Перебирает все ~5000 производимых предметов игры (1 ран чертежа каждый, ME как указано, build/buy
+        оптимизация, Jita, без учёта job cost в другой системе и налога комплекса) и показывает те, чья прибыль
+        (Sell revenue − затраты, уже с учётом Sales Tax и Broker's Fee из панели «🏗️ Мои структуры») попадает
+        в диапазон. Первый запуск может занять 1–2 минуты (тысячи запросов цен к ESI), дальше — из кэша, почти
+        мгновенно.
+      </p>
+      <div class="scan-params-row">
+        <label>Прибыль от, ISK
+          <input id="scanMinProfit" type="number" step="100000" value="1000000" />
+        </label>
+        <label>Прибыль до, ISK
+          <input id="scanMaxProfit" type="number" step="100000" value="5000000" />
+        </label>
+        <label>ME (0–10)
+          <input id="scanMe" type="number" min="0" max="10" value="10" />
+        </label>
+        <button id="scanBtn">Найти</button>
+      </div>
+      <p class="hint" id="scanStatusLine"></p>
+
+      <table class="tree-table">
+        <thead>
+          <tr><th>Предмет</th><th>Кол-во за ран</th><th>Затраты</th><th>Выручка (Sell)</th><th>Прибыль (Sell)</th><th>Прибыль (Quick Sell)</th><th></th></tr>
+        </thead>
+        <tbody id="scanResultsBody"></tbody>
+      </table>
+    </section>
+  </div>
+</div>
+
+<div id="lpPanel" class="structures-panel hidden">
+  <div class="structures-panel-inner">
+    <section>
+      <h2>LP-магазины — что реально выгодно менять</h2>
+      <p class="hint">
+        Цена всех офферов Guristas и State Protectorate (ESI, публичные данные — LP store не требует входа).
+        Прибыль = стоимость награды − ISK-цена оффера − стоимость доп. предметов для сдачи (если есть).
+        ISK/LP — сколько ISK приносит один потраченный LP, это и есть метрика для сравнения офферов
+        (у самих LP нет фиксированной цены в ISK — их «стоимость» это миссии/время на фарм).
+        Награды-<b>чертежи</b> (LP-стор часто продаёт именно их, а не сам предмет — обычные рыночные ордера
+        на чертежи не существуют) оцениваются через тот же движок постройки: стоимость и ценность ОДНОГО
+        рана постройки при указанном ME — ESI не сообщает, сколько ранов у чертежа с LP-стора, поэтому это
+        консервативная оценка (не полная ценность чертежа на много ранов).
+      </p>
+      <div class="scan-params-row">
+        <label><input type="checkbox" id="lpCorpGuristas" checked /> Guristas</label>
+        <label><input type="checkbox" id="lpCorpState" checked /> State Protectorate</label>
+        <label>ME чертежей (0–10)
+          <input id="lpMe" type="number" min="0" max="10" value="0" />
+        </label>
+        <button id="lpBtn">Найти</button>
+      </div>
+      <p class="hint" id="lpStatusLine"></p>
+
+      <table class="tree-table">
+        <thead>
+          <tr><th>Корп.</th><th>Награда</th><th>Кол-во</th><th>LP</th><th>ISK</th><th>Доп. предметы</th><th>Затраты</th><th>Ценность</th><th>Прибыль</th><th>ISK/LP</th><th></th></tr>
+        </thead>
+        <tbody id="lpResultsBody"></tbody>
+      </table>
+    </section>
+  </div>
+</div>
+
+<div id="structuresPanel" class="structures-panel hidden">
+  <div class="structures-panel-inner">
+    <section class="sso-section">
+      <h2>EVE SSO</h2>
+      <div id="ssoLoggedOut">
+        <div id="ssoConfigForm">
+          <p class="hint">
+            Чтобы автоматически подтягивать структуры своей корпорации (Raitaru/Azbel/Sotiyo и т.д.), заведите приложение на
+            <a href="https://developers.eveonline.com/applications" target="_blank" rel="noopener">developers.eveonline.com/applications</a>:
+            тип «Authentication & API Access», Callback URL — <code id="redirectUriHint">http://localhost:3099/auth/callback</code>,
+            scopes: <code id="scopesHint"></code>. Затем вставьте Client ID и Secret ниже.
+          </p>
+          <div class="sso-config-row">
+            <input id="clientIdInput" type="text" placeholder="Client ID" autocomplete="off" />
+            <input id="clientSecretInput" type="password" placeholder="Client Secret" autocomplete="off" />
+            <button id="saveOauthConfigBtn">Сохранить</button>
+          </div>
+          <p class="hint" id="oauthConfigStatus"></p>
+        </div>
+        <a id="loginBtn" class="topbar-btn login-btn hidden" href="/auth/login">Войти через EVE SSO</a>
+      </div>
+      <div id="ssoLoggedIn" class="hidden">
+        Вход выполнен: <b id="characterNameLabel"></b>
+        <button id="syncCorpBtn" class="optimize-btn">Синхронизировать структуры корпорации</button>
+        <button id="logoutBtn" class="topbar-btn">Выйти</button>
+        <p class="hint" id="syncStatus"></p>
+      </div>
+    </section>
+
+    <section class="taxes-section">
+      <h2>Налоги персонажа (Sales Tax / Broker's Fee)</h2>
+      <p class="hint">
+        Считаются из ваших скиллов Accounting/Broker Relations и репутации к Caldari Navy (владелец Jita 4-4) —
+        формулы CCP: Sales Tax = 7.5%×(1−11%×Accounting), Broker's Fee = 3%−0.3%×Broker Relations−0.03%×фракция−0.02%×корпорация.
+        Применяются к выручке везде на сайте (Sell учитывает оба, Quick Sell — только Sales Tax, комиссии на покупку нет).
+        Можно поправить вручную.
+      </p>
+      <div class="scan-params-row">
+        <label>Sales Tax, %
+          <input id="salesTaxInput" type="number" min="0" max="8" step="0.01" value="0" />
+        </label>
+        <label>Broker's Fee, %
+          <input id="brokerFeeInput" type="number" min="0" max="5" step="0.01" value="0" />
+        </label>
+        <button id="fetchTaxRatesBtn" class="optimize-btn">Подтянуть из аккаунта</button>
+      </div>
+      <p class="hint" id="taxRatesStatus"></p>
+    </section>
+
+    <section class="structures-list-section">
+      <h2>Список структур (используются в «Найти лучшую систему»)</h2>
+      <table class="tree-table">
+        <thead><tr><th>Название</th><th>Система</th><th>Тип</th><th>Налог, %</th><th>Источник</th><th></th></tr></thead>
+        <tbody id="structuresBody"></tbody>
+      </table>
+
+      <div class="add-structure-row">
+        <input id="newStructureName" type="text" placeholder="Название структуры" autocomplete="off" />
+        <div class="system-picker-label">
+          <input id="newStructureSystem" type="text" placeholder="Система" autocomplete="off" />
+          <div id="newStructureSystemResults" class="search-results hidden"></div>
+        </div>
+        <select id="newStructureType">
+          <option value="">Тип (необязательно)</option>
+          <option>Raitaru</option>
+          <option>Azbel</option>
+          <option>Sotiyo</option>
+          <option>Athanor</option>
+          <option>Tatara</option>
+        </select>
+        <input id="newStructureTax" type="number" min="0" max="100" step="0.1" value="0" placeholder="Налог %" />
+        <button id="addStructureBtn">Добавить</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-search">
+      <input id="search" type="text" autocomplete="off" placeholder="Поиск предметов..." />
+    </div>
+    <div id="browseList" class="browse-list"></div>
+  </aside>
+
+  <main class="content">
+    <div id="emptyState" class="empty-state">
+      <p>Выберите предмет слева — через поиск или список категорий,<br/>как в маркете EVE.</p>
+    </div>
+
+    <div id="itemView" class="item-view hidden">
+      <div class="item-header">
+        <img id="itemIcon" class="item-icon" src="" alt="" />
+        <div class="item-header-text">
+          <h1 id="itemName">—</h1>
+          <span id="itemBadge" class="item-badge"></span>
+        </div>
+      </div>
+
+      <div class="market-panel">
+        <div class="market-col">
+          <h3>Sell Orders <span class="market-col-hint">(instant buy)</span></h3>
+          <table class="order-table"><thead><tr><th>Кол-во</th><th>Цена ISK</th></tr></thead><tbody id="sellOrdersBody"></tbody></table>
+        </div>
+        <div class="market-col">
+          <h3>Buy Orders <span class="market-col-hint">(instant sell)</span></h3>
+          <table class="order-table"><thead><tr><th>Кол-во</th><th>Цена ISK</th></tr></thead><tbody id="buyOrdersBody"></tbody></table>
+        </div>
+      </div>
+
+      <div class="panel params-panel" id="paramsPanel">
+        <div class="params-row">
+          <label>Количество единиц
+            <input id="quantity" type="number" min="1" value="1" />
+          </label>
+          <label>ME чертежей (0–10)
+            <input id="me" type="number" min="0" max="10" value="10" />
+          </label>
+          <label class="system-picker-label">Система производства
+            <input id="systemSearch" type="text" autocomplete="off" placeholder="Jita" />
+            <div id="systemResults" class="search-results hidden"></div>
+          </label>
+          <label>Налог комплекса, %
+            <input id="facilityTax" type="number" min="0" max="100" step="0.1" value="0" />
+          </label>
+          <label class="system-picker-label">Где продавать
+            <input id="sellSystemSearch" type="text" autocomplete="off" placeholder="Jita" />
+            <div id="sellSystemResults" class="search-results hidden"></div>
+          </label>
+          <button id="calcBtn">Рассчитать производство</button>
+          <button id="findSystemBtn" class="optimize-btn">🔍 Найти лучшую систему</button>
+        </div>
+        <p class="hint">ME применяется одинаково ко всем чертежам в цепочке. Стоимость работ (job cost) считается по индексу стоимости выбранной системы + налог комплекса. Расчёт сразу подбирает для каждого материала более дешёвый вариант (строить или купить) с учётом job cost — максимальную выгоду. В дереве можно переключить вручную, кнопка «Оптимизировать» вернёт лучший вариант. «Где продавать» влияет только на выручку готового предмета (Sell/Quick Sell) — материалы всегда считаются по ценам Jita 4-4, это отдельная система от «Система производства».</p>
+
+        <div id="bestSystemsPanel" class="best-systems-panel hidden">
+          <h2>Лучшие системы для постройки (≤10 прыжков от Jita)</h2>
+          <div class="avoid-systems-row">
+            <label class="system-picker-label avoid-picker-label">Игнорировать системы (маршрут и подбор систем их обходят)
+              <input id="avoidSystemSearch" type="text" autocomplete="off" placeholder="Добавить систему…" />
+              <div id="avoidSystemResults" class="search-results hidden"></div>
+            </label>
+            <div id="avoidSystemTags" class="avoid-tags"></div>
+          </div>
+          <table class="tree-table">
+            <thead><tr><th>Система</th><th>Сек.</th><th>Прыжков</th><th>Индекс</th><th>Job cost</th><th>Итого</th><th>Станции</th><th></th><th></th></tr></thead>
+            <tbody id="bestSystemsBody"></tbody>
+          </table>
+          <p class="hint">Материалы всегда считаются по ценам Jita 4-4 (нужно довезти), сравнивается только job cost + выбор строить/купить каждого компонента в этой системе. Топ-10 — системы, где среди известных NPC-станций есть хотя бы одна с услугой Manufacturing, в пределах 10 прыжков (сами прыжки и подбор систем обходят игнорируемые системы выше); свои структуры (🏗️, вкладка «Мои структуры») показываются всегда, с их собственным налогом, независимо от места в рейтинге. Кнопка «Путь» показывает маршрут по стар-гейтам от Jita.</p>
+        </div>
+      </div>
+
+      <div class="panel" id="treePanel" hidden>
+        <div class="tree-panel-header">
+          <h2>Дерево производства</h2>
+          <button id="optimizeBtn" class="optimize-btn" title="Для каждого материала выбрать дешёвый вариант: строить или купить">⚡ Оптимизировать build/buy</button>
+        </div>
+        <table class="tree-table">
+          <thead><tr><th>Ресурс</th><th>Кол-во</th><th>Цена/ед.</th><th>Job cost</th><th>Сумма</th><th></th></tr></thead>
+          <tbody id="tree"></tbody>
+        </table>
+      </div>
+
+      <div class="panel" id="resultsPanel" hidden>
+        <div class="results-grid">
+          <div class="result-card">
+            <h3>Затраты (материалы + job cost)</h3>
+            <div class="result-big" id="totalCost">—</div>
+            <div class="result-sub" id="costBreakdown"></div>
+            <div class="result-savings" id="costSavings"></div>
+          </div>
+          <div class="result-card">
+            <h3>Quick Sell <span id="sellLocationLabelQuick" class="sell-location-tag"></span></h3>
+            <div class="result-big" id="revenueQuickSell">—</div>
+            <div class="result-sub">Продажа в текущий ордер на покупку</div>
+            <div class="result-profit" id="profitQuickSell">—</div>
+          </div>
+          <div class="result-card">
+            <h3>Sell (по цене instant buy) <span id="sellLocationLabelSell" class="sell-location-tag"></span></h3>
+            <div class="result-big" id="revenueSell">—</div>
+            <div class="result-sub">Выставить ордер по текущей мин. цене продажи</div>
+            <div class="result-profit" id="profitSell">—</div>
+          </div>
+        </div>
+        <p class="hint">Job cost = EIV материалов × (индекс стоимости системы + налог комплекса). Выручка уже учитывает Sales Tax и Broker's Fee — задаются в панели «🏗️ Мои структуры» (по умолчанию 0%, можно подтянуть из аккаунта через EVE SSO или вписать вручную).</p>
+
+        <button id="appraiseBtn" class="compare-btn">Открыть все компоненты на appraise.gnf.lt ↗</button>
+        <p class="hint" id="appraiseNote"></p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
