@@ -18,7 +18,18 @@ const app = express();
 const PORT = process.env.PORT ?? 3099;
 // PUBLIC=1 снимает привязку к localhost и выключает EVE SSO (см. ниже).
 // Без неё всё работает как раньше: только с этого компьютера.
-const PUBLIC = process.env.PUBLIC === "1";
+// На хостинге публичный режим включается сам: там личный вход EVE не нужен
+// и небезопасен. Локально остаётся выключенным — привязка к 127.0.0.1 и есть защита.
+// PUBLIC=1 включает принудительно, PUBLIC=0 — принудительно выключает.
+const ON_HOST = Boolean(
+  process.env.RENDER ||
+    process.env.RENDER_SERVICE_ID ||
+    process.env.FLY_APP_NAME ||
+    process.env.KOYEB_APP_NAME ||
+    process.env.RAILWAY_ENVIRONMENT
+);
+const PUBLIC =
+  process.env.PUBLIC === "1" || (ON_HOST && process.env.PUBLIC !== "0");
 const HOST = process.env.HOST ?? (PUBLIC ? "0.0.0.0" : "127.0.0.1");
 
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -1088,6 +1099,13 @@ app.get("/api/scan-products", async (req, res) => {
     res.status(500).json({ error: String(err.message ?? err) });
   }
 });
+
+if (!PUBLIC && process.env.PORT && HOST === "127.0.0.1") {
+  console.warn(
+    "[!] PORT задан, но публичный режим выключен: сервер слушает только 127.0.0.1 " +
+      "и снаружи недоступен. Для хостинга задайте PUBLIC=1."
+  );
+}
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`EVE production calculator running at http://${HOST}:${PORT}`);
