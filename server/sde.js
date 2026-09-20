@@ -204,6 +204,34 @@ function groupHasContent(groupID) {
   return (groupChildren.get(groupID)?.length ?? 0) > 0 || (itemsByGroup.get(groupID)?.length ?? 0) > 0;
 }
 
+// CCP's own market-group icon graphics (invMarketGroups.iconID) aren't
+// served by any public image endpoint — images.evetech.net only does
+// per-TYPE icons/renders, nothing by icon ID. So each group's sidebar icon
+// is a real item's icon (the same CDN this app already uses everywhere for
+// items) borrowed from whatever that group actually contains — first item
+// alphabetically if the group holds items directly, otherwise the first one
+// found in its subgroups. Real EVE icons either way, just not necessarily
+// CCP's exact folder glyph for that group.
+const representativeTypeCache = new Map();
+function representativeTypeID(groupID) {
+  if (representativeTypeCache.has(groupID)) return representativeTypeCache.get(groupID);
+  representativeTypeCache.set(groupID, null); // guard against cyclical parent data, if any
+  const direct = itemsByGroup.get(groupID);
+  if (direct?.length) {
+    const id = direct[0].typeID;
+    representativeTypeCache.set(groupID, id);
+    return id;
+  }
+  for (const childID of groupChildren.get(groupID) ?? []) {
+    const id = representativeTypeID(childID);
+    if (id !== null) {
+      representativeTypeCache.set(groupID, id);
+      return id;
+    }
+  }
+  return null;
+}
+
 // Returns the children of a market group for lazy tree browsing: subgroups
 // (with a hasChildren flag) and items directly filed under this group.
 // groupID === null/undefined lists the top-level (root) categories.
@@ -216,6 +244,7 @@ export function browseGroup(groupID) {
       groupID: id,
       name: marketGroups[id]?.name ?? `#${id}`,
       hasChildren: (groupChildren.get(id)?.length ?? 0) > 0,
+      iconTypeID: representativeTypeID(id),
     }));
   const items = key === ROOT_KEY ? [] : itemsByGroup.get(key) ?? [];
   return { groups, items };

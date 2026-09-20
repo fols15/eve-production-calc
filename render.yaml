@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: eve-production-calc
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: node server/index.js
+    envVars:
+      - key: PUBLIC
+        value: "1"
+      - key: NODE_VERSION
+        value: "22"
+      - key: ESI_USER_AGENT
+        value: "eve-production-calc (public) - bxbgdhdh3@gmail.com"

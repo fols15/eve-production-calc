@@ -16,6 +16,51 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_DIR = path.join(__dirname, "..", "data", "user");
 const FILE = path.join(USER_DIR, "structures.json");
 
+// Base manufacturing material bonus baked into the structure hull itself,
+// independent of ME/TE research on the blueprint. CCP doesn't expose this
+// through the dogma attributes ESI serves — it's server-side industry-formula
+// logic with no inspectable attribute, so this is cited from EVE University's
+// structure bonus table (wiki.eveuniversity.org/Upwell_structures) rather
+// than derived from an API response. Refineries (Athanor/Tatara) are
+// deliberately absent: their documented bonus is to REFINING (ore
+// reprocessing) yield, a different job entirely from the reaction jobs this
+// tool prices — no manufacturing/reaction material bonus for them is
+// documented, so assume 0 rather than guess.
+const STRUCTURE_BASE_ME_BONUS = { Raitaru: 1, Azbel: 1, Sotiyo: 1 };
+
+export function getStructureMePct(structure) {
+  return STRUCTURE_BASE_ME_BONUS[structure.typeName] ?? 0;
+}
+
+// Separate "Job fee" bonus — reduces the SYSTEM COST INDEX portion of job
+// cost (not materials, not facility tax, not the SCC surcharge). Cross-
+// checked against a real in-game "Job Gross Cost" breakdown (a Raitaru
+// showed "Structure Role Bonus -3.0%" cutting exactly 3% off the cost-index
+// amount, matching this table) — see bom.js for where it's applied.
+const STRUCTURE_JOB_FEE_BONUS = { Raitaru: 3, Azbel: 4, Sotiyo: 5 };
+
+export function getStructureJobFeeBonus(structure) {
+  return STRUCTURE_JOB_FEE_BONUS[structure.typeName] ?? 0;
+}
+
+// Job DURATION bonus — separate from everything above, reduces wall-clock
+// time only (ISK cost unaffected). Engineering Complexes speed up
+// Manufacturing (and science) jobs; Refineries speed up Reaction jobs
+// instead — a Raitaru gives 0% here for a reaction and vice versa. Source:
+// EVE University's structure bonus table (wiki.eveuniversity.org/Upwell_structures).
+const STRUCTURE_DURATION_BONUS = {
+  Raitaru: { manufacturing: 15 },
+  Azbel: { manufacturing: 20 },
+  Sotiyo: { manufacturing: 30 },
+  Athanor: { reaction: 3 },
+  Tatara: { reaction: 25 },
+};
+
+export function getStructureDurationBonus(structure, activityID) {
+  const key = activityID === 11 ? "reaction" : "manufacturing";
+  return STRUCTURE_DURATION_BONUS[structure.typeName]?.[key] ?? 0;
+}
+
 function load() {
   try {
     return JSON.parse(fs.readFileSync(FILE, "utf8"));
@@ -34,7 +79,7 @@ export function listStructures() {
   return [...data.manual, ...data.corp];
 }
 
-export function addManualStructure({ name, systemId, systemName, typeId, typeName, facilityTax }) {
+export function addManualStructure({ name, systemId, systemName, typeId, typeName, facilityTax, structureId }) {
   const data = load();
   const entry = {
     id: randomUUID(),
@@ -43,6 +88,7 @@ export function addManualStructure({ name, systemId, systemName, typeId, typeNam
     systemName,
     typeId: typeId ?? null,
     typeName: typeName ?? null,
+    structureId: structureId ?? null, // set when added via ESI search — the real Upwell structure_id
     facilityTax: Number(facilityTax) || 0,
     source: "manual",
   };
@@ -130,4 +176,50 @@ export async function syncCorpStructures() {
 
   replaceCorpStructures(entries);
   return entries;
+}
+
+// Resolves a THIRD-PARTY structure (not your own corp's) by name into a real
+// structure_id/system/type — the only ESI-legal way to do this, since there
+// is no "list structures in system X" endpoint (unlike NPC stations, which
+// are public knowledge; a citadel's existence is only visible to characters
+// who already have some reason to know about it — docked there, fleeted
+// with someone who did, etc.). /characters/{id}/search/ only returns IDs; a
+// second call per ID resolves the actual name/system/type, and silently
+// drops any ID the character no longer has visibility into (a stale/
+// unanchored structure, or one they never really had access to) rather than
+// failing the whole search over one bad result.
+export async function searchStructuresByName(query) {
+  const auth = getAuth();
+  if (!auth) throw new Error("не выполнен вход через EVE SSO");
+  const q = query.trim();
+  if (q.length < 3) throw new Error("минимум 3 символа для поиска (ограничение ESI)");
+
+  const token = await getValidAccessToken();
+  const headers = { Authorization: `Bearer ${token}` };
+
+  const searchRes = await fetch(
+    `https://esi.evetech.net/latest/characters/${auth.characterId}/search/?categories=structure&search=${encodeURIComponent(q)}&datasource=tranquility`,
+    { headers }
+  );
+  if (searchRes.status === 403) throw new Error("нужен scope esi-search.search_structures.v1 — перелогиньтесь через EVE SSO");
+  if (!searchRes.ok) throw new Error(`ESI search error ${searchRes.status}`);
+  const structureIds = (await searchRes.json()).structure ?? [];
+
+  const results = [];
+  for (const structureId of structureIds.slice(0, 15)) {
+    const detailRes = await fetch(`https://esi.evetech.net/latest/universe/structures/${structureId}/?datasource=tranquility`, { headers });
+    if (!detailRes.ok) continue; // no docking access to this one (anymore) — skip, don't fail the whole search
+    const detail = await detailRes.json();
+    const systemMeta = getSystem(detail.solar_system_id);
+    const typeMeta = getType(detail.type_id);
+    results.push({
+      structureId,
+      name: detail.name,
+      systemId: detail.solar_system_id,
+      systemName: systemMeta?.name ?? `#${detail.solar_system_id}`,
+      typeId: detail.type_id,
+      typeName: typeMeta?.name ?? null,
+    });
+  }
+  return results;
 }

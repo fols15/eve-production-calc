@@ -14,6 +14,8 @@ fs.mkdirSync(RAW_DIR, { recursive: true });
 const BASE = "https://www.fuzzwork.co.uk/dump/latest/csv/";
 const FILES = [
   "invTypes.csv",
+  "invMetaTypes.csv",
+  "invGroups.csv",
   "industryActivity.csv",
   "industryActivityMaterials.csv",
   "industryActivityProducts.csv",
@@ -46,16 +48,45 @@ function readCsv(name) {
 async function main() {
   for (const f of FILES) await download(f);
 
+  // typeID -> metaGroupID (1 Tech I, 2 Tech II, 3 Storyline, 4 Faction,
+  // 5 Officer, 6 Deadspace, 14 Tech III, 15 Abyssal, 17 Premium, 19 Limited
+  // Time, 52/53/54 Structure Faction/Tech II/Tech I — verified live against
+  // Fuzzwork's invMetaGroups.csv). A type with no row here has no meta
+  // variant at all (never had one to begin with, e.g. a skillbook or a
+  // plain commodity) — NOT the same as "Tech I with a row", but harmless to
+  // treat as Tech I for our purposes since it's just as ordinarily buildable.
+  console.log("parsing invMetaTypes.csv ...");
+  const metaTypeRows = readCsv("invMetaTypes.csv");
+  const metaGroupByType = new Map();
+  for (const row of metaTypeRows) {
+    metaGroupByType.set(Number(row.typeID), Number(row.metaGroupID));
+  }
+  console.log(`  ${metaGroupByType.size} types with a known meta group`);
+
+  // groupID -> categoryID (e.g. "Ship" = 6, verified live against Fuzzwork's
+  // invCategories.csv) — lets the scanner filter to just ships without
+  // guessing from item names.
+  console.log("parsing invGroups.csv ...");
+  const groupRows = readCsv("invGroups.csv");
+  const categoryByGroup = new Map();
+  for (const row of groupRows) {
+    categoryByGroup.set(Number(row.groupID), Number(row.categoryID));
+  }
+  console.log(`  ${categoryByGroup.size} groups`);
+
   console.log("parsing invTypes.csv ...");
   const invTypes = readCsv("invTypes.csv");
   const types = {};
   for (const row of invTypes) {
     const typeID = Number(row.typeID);
     if (row.published !== "1" && row.published !== "True" && row.published !== "true") continue;
+    const groupID = Number(row.groupID);
     types[typeID] = {
       name: row.typeName,
-      groupID: Number(row.groupID),
+      groupID,
+      categoryID: categoryByGroup.get(groupID) ?? null,
       marketGroupID: row.marketGroupID ? Number(row.marketGroupID) : null,
+      metaGroupID: metaGroupByType.get(typeID) ?? 1,
     };
   }
   console.log(`  ${Object.keys(types).length} published types`);
@@ -193,7 +224,10 @@ async function main() {
       `(${manufacturingStationCount} offer Manufacturing)`
   );
 
-  console.log("done. wrote data/types.json, data/blueprints.json, data/marketGroups.json, data/systems.json, data/systemJumps.json, data/stations.json");
+  console.log(
+    "done. wrote data/types.json, data/blueprints.json, data/marketGroups.json, data/systems.json, " +
+      "data/systemJumps.json, data/stations.json"
+  );
 }
 
 main().catch((err) => {

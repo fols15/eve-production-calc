@@ -19,6 +19,18 @@ export const SCOPES = [
   "esi-universe.read_structures.v1",
   "esi-skills.read_skills.v1",
   "esi-characters.read_standings.v1",
+  // Lets the character look up a THIRD-PARTY structure by name (ESI's
+  // GET /characters/{id}/search/, category "structure") — the only way to
+  // resolve one you don't own into a real structure_id/system/type, since
+  // CCP doesn't expose a "list structures in this system" endpoint at all
+  // (unlike NPC stations, which are public). See structures.js/searchStructuresByName.
+  "esi-search.search_structures.v1",
+  // Character's OWNED blueprints (GET /characters/{id}/blueprints/) — lets
+  // the calc skip charging for a blueprint copy the character already owns
+  // as an ORIGINAL (infinitely reusable, quantity -1 or a positive stack —
+  // see character.js/getOwnedBlueprints) and use its real ME/TE instead of
+  // guessing from a contract-bought copy.
+  "esi-characters.read_blueprints.v1",
 ];
 
 let pendingState = null;

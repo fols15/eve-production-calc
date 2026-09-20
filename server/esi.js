@@ -3,6 +3,9 @@
 // this tool's whole premise, see README. getSystemPrices() is the one
 // exception: it prices an arbitrary solar system, used only for "where to
 // sell the finished product" (revenue), never for material costing.
+const ESI_USER_AGENT =
+  process.env.ESI_USER_AGENT ?? "eve-production-calc (local private tool)";
+
 const JITA_REGION_ID = 10000002; // The Forge
 const JITA_STATION_ID = 60003760; // Jita IV - Moon 4 - Caldari Navy Assembly Plant
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -15,7 +18,7 @@ async function fetchAllPages(regionId, typeID) {
   let totalPages = 1;
   do {
     const url = `https://esi.evetech.net/latest/markets/${regionId}/orders/?datasource=tranquility&order_type=all&page=${page}&type_id=${typeID}`;
-    const res = await fetch(url, { headers: { "User-Agent": "eve-production-calc (local private tool)" } });
+    const res = await fetch(url, { headers: { "User-Agent": ESI_USER_AGENT } });
     if (!res.ok) {
       if (res.status === 404) break; // no orders for this type at all
       throw new Error(`ESI error ${res.status} for type ${typeID}`);
@@ -129,22 +132,63 @@ export async function getOrderBook(typeID, limit = 5) {
   return { sell, buy };
 }
 
-export async function getJitaPricesBulk(typeIDs, concurrency = 8) {
+async function bulkPrices(typeIDs, priceFn, concurrency) {
   const unique = [...new Set(typeIDs)];
   const results = {};
-  const CONCURRENCY = concurrency;
   let i = 0;
   async function worker() {
     while (i < unique.length) {
       const idx = i++;
       const typeID = unique[idx];
       try {
-        results[typeID] = await getJitaPrices(typeID);
+        results[typeID] = await priceFn(typeID);
       } catch (err) {
         results[typeID] = { sell: null, buy: null, error: String(err.message ?? err) };
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, unique.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(concurrency, unique.length) }, worker));
   return results;
+}
+
+export async function getJitaPricesBulk(typeIDs, concurrency = 8) {
+  return bulkPrices(typeIDs, getJitaPrices, concurrency);
+}
+
+// Region-wide (The Forge), not station-scoped — the one exception to this
+// tool's "Jita 4-4 only" pricing rule, used just for blueprints: contracts
+// (see contracts.js) and Reaction Formula market listings (the one
+// blueprint-ish item CCP lets trade on plain market orders) are both thin
+// enough that restricting to a single station missed real, legitimate
+// listings elsewhere in the same region.
+export async function getForgeRegionPrices(typeID) {
+  const orders = await getRegionOrders(JITA_REGION_ID, typeID);
+  return summarizeOrders(orders);
+}
+
+export async function getForgeRegionPricesBulk(typeIDs, concurrency = 8) {
+  return bulkPrices(typeIDs, getForgeRegionPrices, concurrency);
+}
+
+const historyCache = new Map(); // typeID -> { expires, rows }
+const HISTORY_CACHE_TTL_MS = 60 * 60 * 1000; // CCP recomputes this once/day — an hour is plenty fresh
+
+// Daily price/volume history for the price+volume chart — ESI's
+// GET /markets/{region_id}/history/, region-wide (The Forge), since ESI
+// doesn't offer station-scoped history the way it does live orders. Shape
+// per day: { date, average, highest, lowest, order_count, volume }.
+export async function getMarketHistory(typeID) {
+  const cached = historyCache.get(typeID);
+  if (cached && cached.expires > Date.now()) return cached.rows;
+
+  const url = `https://esi.evetech.net/latest/markets/${JITA_REGION_ID}/history/?datasource=tranquility&type_id=${typeID}`;
+  const res = await fetch(url, { headers: { "User-Agent": ESI_USER_AGENT } });
+  if (!res.ok) {
+    if (res.status === 404) return []; // no trade history for this type at all
+    throw new Error(`ESI history error ${res.status} for type ${typeID}`);
+  }
+  const rows = await res.json();
+  rows.sort((a, b) => a.date.localeCompare(b.date));
+  historyCache.set(typeID, { expires: Date.now() + HISTORY_CACHE_TTL_MS, rows });
+  return rows;
 }

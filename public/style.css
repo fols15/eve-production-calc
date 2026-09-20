@@ -55,6 +55,10 @@ body {
   text-decoration: none;
 }
 .topbar-btn:hover { background: #10202a; }
+.eve-login-btn { background: var(--cyan); color: #05131a; border-color: var(--cyan); font-weight: 700; }
+.eve-login-btn:hover { background: #6fd3ff; }
+.topbar-auth-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--gold); }
+.topbar-logout-btn { padding: 3px 8px; font-size: 10.5px; }
 
 /* ---- structures panel ---- */
 .structures-panel {
@@ -81,6 +85,8 @@ code { background: var(--bg-inset); padding: 1px 5px; border-radius: 3px; font-s
   border-radius: 4px; color: var(--text); font-size: 12.5px;
 }
 .add-structure-row .system-picker-label { width: 180px; }
+.structure-search-row .structure-search-label { width: 320px; }
+.structure-search-row #structureSearchInput { width: 100%; }
 .scan-params-row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-top: 8px; }
 .scan-params-row label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .scan-params-row input {
@@ -154,12 +160,34 @@ code { background: var(--bg-inset); padding: 1px 5px; border-radius: 3px; font-s
 .browse-loading, .browse-empty { color: var(--muted); font-size: 12px; padding: 6px; }
 
 /* ---- item header ---- */
-.item-view { max-width: 980px; }
+.content-row { display: flex; align-items: flex-start; gap: 24px; }
+.item-view { max-width: 980px; flex: 1; min-width: 0; }
+.blueprints-panel { width: 620px; flex-shrink: 0; position: sticky; top: 20px; }
+.blueprints-panel .tree-table { margin-top: 10px; }
+.bp-source-picker { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.bp-source-picker label { display: flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer; }
+.bp-breakeven { font-size: 11px; color: var(--muted); }
+.bp-breakeven.bp-breakeven-good { color: var(--buy); }
+.bp-breakeven.bp-breakeven-bad { color: var(--sell); }
+.bp-copy-durability { font-size: 11px; color: var(--muted); }
+.bp-investment-summary {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-inset);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.bp-investment-summary .bp-investment-value { font-weight: 600; }
+.bp-investment-summary.bp-investment-good .bp-investment-value { color: var(--buy); }
+.bp-investment-summary.bp-investment-bad .bp-investment-value { color: var(--sell); }
 .item-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
 .item-icon { width: 56px; height: 56px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-inset); }
 .item-header-text h1 { margin: 0; font-size: 20px; color: var(--gold); font-weight: 600; }
 .item-badge { font-size: 11px; color: var(--muted); }
 .item-badge.buildable { color: var(--buy); }
+.item-badge.batch-info { display: block; margin-top: 3px; color: var(--cyan); font-weight: 600; }
 
 /* ---- market order book ---- */
 .market-panel { display: flex; gap: 16px; margin-bottom: 18px; }
@@ -186,6 +214,10 @@ code { background: var(--bg-inset); padding: 1px 5px; border-radius: 3px; font-s
 
 .tree-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .tree-panel-header h2 { margin: 0; }
+
+.chart-panel-header h3 { margin: 0 0 10px; font-size: 12px; color: var(--gold); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+.chart-canvas-wrap { position: relative; height: 220px; }
+.chart-canvas-wrap-volume { height: 90px; margin-top: 4px; }
 .optimize-btn {
   background: var(--bg-inset);
   color: var(--buy);
@@ -294,6 +326,7 @@ button {
 }
 button:disabled { background: #33394a; color: var(--muted); cursor: not-allowed; }
 .hint { color: var(--muted); font-size: 11.5px; margin-top: 10px; margin-bottom: 0; }
+.hint-inline { color: var(--muted); font-size: 11px; }
 
 /* ---- production tree table ---- */
 .tree-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -306,6 +339,7 @@ button:disabled { background: #33394a; color: var(--muted); cursor: not-allowed;
 .tree-row .name { white-space: nowrap; }
 .tree-row .leaf-tag { color: var(--muted); font-size: 10px; }
 .tree-row .cost-cell { color: var(--gold); }
+.me-bonus-cell { color: var(--cyan); font-weight: 600; }
 .tree-row .toggle-cell { text-align: center !important; }
 .tree-row .toggle-cell label { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--muted); justify-content: center; }
 
@@ -335,3 +369,12 @@ button:disabled { background: #33394a; color: var(--muted); cursor: not-allowed;
 .result-profit { font-size: 13px; font-weight: 600; margin-top: 8px; }
 .profit-pos { color: var(--buy); }
 .profit-neg { color: var(--bad); }
+
+
+/* Публичный режим (PUBLIC=1): EVE SSO и личные структуры отключены на
+   сервере, поэтому убираем и ведущие к ним кнопки. */
+.public-mode #topbarLoginBtn,
+.public-mode #topbarSetupBtn,
+.public-mode #topbarAuthStatus,
+.public-mode #structuresToggleBtn,
+.public-mode #structuresPanel { display: none !important; }

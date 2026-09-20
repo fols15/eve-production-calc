@@ -5,15 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>EVE Production Calculator</title>
 <link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
 </head>
 <body>
 <div class="topbar">
   <span class="topbar-title">PRODUCTION</span>
   <div class="topbar-right">
     <button id="scanToggleBtn" class="topbar-btn">💰 Поиск по прибыли</button>
-    <button id="lpToggleBtn" class="topbar-btn">🎖️ LP-магазины</button>
     <button id="structuresToggleBtn" class="topbar-btn">🏗️ Мои структуры</button>
     <span class="topbar-station">Jita IV - Moon 4 - Caldari Navy Assembly Plant</span>
+    <a id="topbarLoginBtn" class="topbar-btn eve-login-btn hidden" href="/auth/login">🔑 Войти через EVE Online</a>
+    <button id="topbarSetupBtn" class="topbar-btn eve-login-btn hidden">🔑 Настроить вход EVE SSO</button>
+    <span id="topbarAuthStatus" class="topbar-auth-status hidden">
+      👤 <b id="topbarCharacterName"></b>
+      <button id="topbarLogoutBtn" class="topbar-btn topbar-logout-btn">Выйти</button>
+    </span>
   </div>
 </div>
 
@@ -22,29 +28,37 @@
     <section>
       <h2>Найти лучший предмет для производства по прибыли</h2>
       <p class="hint">
-        Перебирает все ~5000 производимых предметов игры (1 ран чертежа каждый, ME как указано, build/buy
-        оптимизация, Jita, без учёта job cost в другой системе и налога комплекса) и показывает те, чья прибыль
-        (Sell revenue − затраты, уже с учётом Sales Tax и Broker's Fee из панели «🏗️ Мои структуры») попадает
-        в диапазон. Первый запуск может занять 1–2 минуты (тысячи запросов цен к ESI), дальше — из кэша, почти
-        мгновенно.
+        Для каждого предмета: находит реальный чертёж (свой — если вы вошли через EVE SSO, иначе самая дешёвая
+        копия/оригинал в контрактах или на рынке The Forge) с его настоящим ME, считает материалы с учётом ME и
+        бонусов структуры по ценам Jita 4-4, добавляет цену самого чертежа в расходы (если он не свой), вычитает
+        Sales Tax/Broker's Fee и показывает, сколько получится при продаже — и по обычному ордеру (Sell), и мгновенно
+        (Quick Sell). Предметы без найденного чертежа (ни своего, ни чужого) — пропускаются, считать их прибыль не с
+        чем. Объём — 1 ран чертежа (1 шт. для корабля, обычно 100 шт. для аммо — свой у каждого предмета), если не
+        указано другое число ранов. Производственная площадка — та же система/структура, что
+        выбрана в основном калькуляторе. Исключены предметы, которые в принципе нельзя построить обычным чертежом:
+        фракционные (Navy/Pirate) корабли и модули, офицерские и Deadspace модули, Abyssal-мутаплазмиды, сюжетные
+        (Storyline) награды и фракционные модули структур — всё это приходит через LP-магазины/лут/ивенты (по
+        metaGroupID из SDE). Обычные Tech I/II/III и структурные Tech I/II остаются. Проверка контрактов по всей игре
+        занимает 1–2 минуты на холодном кэше, дальше — почти мгновенно.
       </p>
       <div class="scan-params-row">
         <label>Прибыль от, ISK
           <input id="scanMinProfit" type="number" step="100000" value="1000000" />
         </label>
-        <label>Прибыль до, ISK
-          <input id="scanMaxProfit" type="number" step="100000" value="5000000" />
+        <label>Прибыль до, ISK (пусто = без верхней границы)
+          <input id="scanMaxProfit" type="number" step="100000" value="" />
         </label>
-        <label>ME (0–10)
-          <input id="scanMe" type="number" min="0" max="10" value="10" />
+        <label>Ранов чертежа
+          <input id="scanRuns" type="number" min="1" value="1" />
         </label>
+        <label><input type="checkbox" id="scanShipsOnly" /> Только корабли (по категории SDE, не структуры)</label>
         <button id="scanBtn">Найти</button>
       </div>
       <p class="hint" id="scanStatusLine"></p>
 
       <table class="tree-table">
         <thead>
-          <tr><th>Предмет</th><th>Кол-во за ран</th><th>Затраты</th><th>Выручка (Sell)</th><th>Прибыль (Sell)</th><th>Прибыль (Quick Sell)</th><th></th></tr>
+          <tr><th>Предмет</th><th>Объём</th><th>Затраты</th><th>Выручка (Sell)</th><th>Прибыль (Sell)</th><th>Прибыль (Quick Sell)</th><th>Чертёж (BPC)</th><th></th></tr>
         </thead>
         <tbody id="scanResultsBody"></tbody>
       </table>
@@ -52,39 +66,6 @@
   </div>
 </div>
 
-<div id="lpPanel" class="structures-panel hidden">
-  <div class="structures-panel-inner">
-    <section>
-      <h2>LP-магазины — что реально выгодно менять</h2>
-      <p class="hint">
-        Цена всех офферов Guristas и State Protectorate (ESI, публичные данные — LP store не требует входа).
-        Прибыль = стоимость награды − ISK-цена оффера − стоимость доп. предметов для сдачи (если есть).
-        ISK/LP — сколько ISK приносит один потраченный LP, это и есть метрика для сравнения офферов
-        (у самих LP нет фиксированной цены в ISK — их «стоимость» это миссии/время на фарм).
-        Награды-<b>чертежи</b> (LP-стор часто продаёт именно их, а не сам предмет — обычные рыночные ордера
-        на чертежи не существуют) оцениваются через тот же движок постройки: стоимость и ценность ОДНОГО
-        рана постройки при указанном ME — ESI не сообщает, сколько ранов у чертежа с LP-стора, поэтому это
-        консервативная оценка (не полная ценность чертежа на много ранов).
-      </p>
-      <div class="scan-params-row">
-        <label><input type="checkbox" id="lpCorpGuristas" checked /> Guristas</label>
-        <label><input type="checkbox" id="lpCorpState" checked /> State Protectorate</label>
-        <label>ME чертежей (0–10)
-          <input id="lpMe" type="number" min="0" max="10" value="0" />
-        </label>
-        <button id="lpBtn">Найти</button>
-      </div>
-      <p class="hint" id="lpStatusLine"></p>
-
-      <table class="tree-table">
-        <thead>
-          <tr><th>Корп.</th><th>Награда</th><th>Кол-во</th><th>LP</th><th>ISK</th><th>Доп. предметы</th><th>Затраты</th><th>Ценность</th><th>Прибыль</th><th>ISK/LP</th><th></th></tr>
-        </thead>
-        <tbody id="lpResultsBody"></tbody>
-      </table>
-    </section>
-  </div>
-</div>
 
 <div id="structuresPanel" class="structures-panel hidden">
   <div class="structures-panel-inner">
@@ -116,19 +97,27 @@
     </section>
 
     <section class="taxes-section">
-      <h2>Налоги персонажа (Sales Tax / Broker's Fee)</h2>
+      <h2>Налоги и время персонажа</h2>
       <p class="hint">
-        Считаются из ваших скиллов Accounting/Broker Relations и репутации к Caldari Navy (владелец Jita 4-4) —
-        формулы CCP: Sales Tax = 7.5%×(1−11%×Accounting), Broker's Fee = 3%−0.3%×Broker Relations−0.03%×фракция−0.02%×корпорация.
-        Применяются к выручке везде на сайте (Sell учитывает оба, Quick Sell — только Sales Tax, комиссии на покупку нет).
-        Можно поправить вручную.
+        Sales Tax/Broker's Fee — из скиллов Accounting/Broker Relations и репутации к Caldari Navy (владелец Jita 4-4):
+        Sales Tax = 7.5%×(1−11%×Accounting), Broker's Fee = 3%−0.3%×Broker Relations−0.03%×фракция−0.02%×корпорация.
+        Применяются к выручке везде на сайте (Sell учитывает оба, Quick Sell — только Sales Tax). Industry/Advanced
+        Industry — уровни скиллов, снижают время ПРОИЗВОДСТВА (не реакций — эти скиллы на них не действуют, проверено
+        через ESI dogma): −4%/уровень и −3%/уровень, множатся друг на друга. По умолчанию — необученный персонаж
+        (0 навыков, 0 репутации) — нажмите «Подтянуть из аккаунта» или впишите вручную.
       </p>
       <div class="scan-params-row">
         <label>Sales Tax, %
-          <input id="salesTaxInput" type="number" min="0" max="8" step="0.01" value="0" />
+          <input id="salesTaxInput" type="number" min="0" max="8" step="0.01" value="7.5" />
         </label>
         <label>Broker's Fee, %
-          <input id="brokerFeeInput" type="number" min="0" max="5" step="0.01" value="0" />
+          <input id="brokerFeeInput" type="number" min="0" max="5" step="0.01" value="3" />
+        </label>
+        <label>Industry (0–5)
+          <input id="industryLevelInput" type="number" min="0" max="5" step="1" value="0" />
+        </label>
+        <label>Advanced Industry (0–5)
+          <input id="advancedIndustryLevelInput" type="number" min="0" max="5" step="1" value="0" />
         </label>
         <button id="fetchTaxRatesBtn" class="optimize-btn">Подтянуть из аккаунта</button>
       </div>
@@ -136,12 +125,31 @@
     </section>
 
     <section class="structures-list-section">
-      <h2>Список структур (используются в «Найти лучшую систему»)</h2>
+      <h2>Список структур (используются в «Найти лучшую систему» и в производстве)</h2>
+      <p class="hint">
+        Название, система и тип подтягиваются через ESI по имени структуры — ручной ввод ниже нужен только если
+        поиск ничего не нашёл (нет прав видимости к структуре) или для своей структуры, если не хотите
+        синхронизировать всю корпорацию. Налог комплекса ESI не отдаёт ни для чьих структур (только для своей
+        корпорации через отдельный вход), поэтому впишите его вручную, посмотрев в игре — для NPC-станций он
+        фиксирован на 0.25% и в это поле не входит. «ME структуры» — бонус материалов корпуса
+        (Raitaru/Azbel/Sotiyo +1%). «Job Fee» — отдельный бонус, снижающий часть job cost от индекса стоимости
+        системы (Raitaru −3%, Azbel −4%, Sotiyo −5%). Оба — по данным EVE University, автоматически по типу
+        корпуса, без учёта ригов.
+      </p>
       <table class="tree-table">
-        <thead><tr><th>Название</th><th>Система</th><th>Тип</th><th>Налог, %</th><th>Источник</th><th></th></tr></thead>
+        <thead><tr><th>Название</th><th>Система</th><th>Тип</th><th>Налог, %</th><th>ME структуры</th><th>Job Fee</th><th>Источник</th><th></th></tr></thead>
         <tbody id="structuresBody"></tbody>
       </table>
 
+      <div class="add-structure-row structure-search-row">
+        <div class="system-picker-label structure-search-label">
+          <input id="structureSearchInput" type="text" placeholder="Найти структуру по названию (ESI)..." autocomplete="off" />
+          <div id="structureSearchResults" class="search-results hidden"></div>
+        </div>
+        <span class="hint" id="structureSearchStatus"></span>
+      </div>
+
+      <p class="hint">Или добавить вручную:</p>
       <div class="add-structure-row">
         <input id="newStructureName" type="text" placeholder="Название структуры" autocomplete="off" />
         <div class="system-picker-label">
@@ -176,12 +184,14 @@
       <p>Выберите предмет слева — через поиск или список категорий,<br/>как в маркете EVE.</p>
     </div>
 
+    <div class="content-row">
     <div id="itemView" class="item-view hidden">
       <div class="item-header">
         <img id="itemIcon" class="item-icon" src="" alt="" />
         <div class="item-header-text">
           <h1 id="itemName">—</h1>
           <span id="itemBadge" class="item-badge"></span>
+          <span id="itemBatchInfo" class="item-badge batch-info hidden"></span>
         </div>
       </div>
 
@@ -196,20 +206,36 @@
         </div>
       </div>
 
+      <div class="panel chart-panel" id="chartPanel" hidden>
+        <div class="chart-panel-header">
+          <h3>График цены и объёма <span class="market-col-hint">(The Forge, 90 дней, ESI history — раз в день)</span></h3>
+        </div>
+        <div class="chart-canvas-wrap">
+          <canvas id="priceChart" height="90"></canvas>
+        </div>
+        <div class="chart-canvas-wrap chart-canvas-wrap-volume">
+          <canvas id="volumeChart" height="45"></canvas>
+        </div>
+        <p class="hint" id="chartStatus"></p>
+      </div>
+
       <div class="panel params-panel" id="paramsPanel">
         <div class="params-row">
           <label>Количество единиц
             <input id="quantity" type="number" min="1" value="1" />
           </label>
-          <label>ME чертежей (0–10)
-            <input id="me" type="number" min="0" max="10" value="10" />
-          </label>
+          <label><input type="checkbox" id="disableReactions" /> Не строить реакции (покупать на Jita)</label>
           <label class="system-picker-label">Система производства
             <input id="systemSearch" type="text" autocomplete="off" placeholder="Jita" />
             <div id="systemResults" class="search-results hidden"></div>
           </label>
           <label>Налог комплекса, %
-            <input id="facilityTax" type="number" min="0" max="100" step="0.1" value="0" />
+            <input id="facilityTax" type="number" min="0" max="100" step="0.01" value="0.25" />
+          </label>
+          <label>Или структура (своя/чужая)
+            <select id="structurePicker">
+              <option value="">— вручную, система + налог выше —</option>
+            </select>
           </label>
           <label class="system-picker-label">Где продавать
             <input id="sellSystemSearch" type="text" autocomplete="off" placeholder="Jita" />
@@ -218,7 +244,8 @@
           <button id="calcBtn">Рассчитать производство</button>
           <button id="findSystemBtn" class="optimize-btn">🔍 Найти лучшую систему</button>
         </div>
-        <p class="hint">ME применяется одинаково ко всем чертежам в цепочке. Стоимость работ (job cost) считается по индексу стоимости выбранной системы + налог комплекса. Расчёт сразу подбирает для каждого материала более дешёвый вариант (строить или купить) с учётом job cost — максимальную выгоду. В дереве можно переключить вручную, кнопка «Оптимизировать» вернёт лучший вариант. «Где продавать» влияет только на выручку готового предмета (Sell/Quick Sell) — материалы всегда считаются по ценам Jita 4-4, это отдельная система от «Система производства».</p>
+        <p class="hint">ME/TE каждого чертежа в дереве ниже теперь всегда РЕАЛЬНЫЕ — сервер сам ищет свой чертёж (если вы вошли через EVE SSO), иначе самую дешёвую копию/оригинал в контрактах или на рынке The Forge, и использует именно её ME/TE; цена самой копии/оригинала уже включена в затраты, кроме своего (0 ISK). Если реального чертежа нигде не нашлось — узел просто покупается на рынке, строить его не с чем. Подробности — в панели «Нужные чертежи» справа. Job cost = EIV × (индекс стоимости системы × (1 − Job Fee бонус структуры) + налог комплекса + SCC surcharge 4%) — сверено с реальной раскладкой «Job Gross Cost» в игре. Налог комплекса у NPC-станций фиксирован на 0.25% (не настраивается игроком). Если выбрать структуру вместо ручной системы — её facility tax, ME-бонус и Job Fee бонус (по типу корпуса, настраивается в «Мои структуры») подставляются автоматически. Расчёт сразу подбирает для каждого материала более дешёвый вариант (строить или купить) с учётом job cost и цены чертежа — максимальную выгоду. В дереве можно переключить вручную, кнопка «Оптимизировать» вернёт лучший вариант. «Где продавать» влияет только на выручку готового предмета (Sell/Quick Sell) — материалы всегда считаются по ценам Jita 4-4, это отдельная система от «Система производства». «Не строить реакции» принудительно покупает на Jita любой Reaction Formula продукт в дереве, независимо от того, что выгоднее по расчёту — для тех, кто в принципе не хочет заниматься реакциями.</p>
+        <p class="hint" id="structureBonusLine"></p>
 
         <div id="bestSystemsPanel" class="best-systems-panel hidden">
           <h2>Лучшие системы для постройки (≤10 прыжков от Jita)</h2>
@@ -243,7 +270,7 @@
           <button id="optimizeBtn" class="optimize-btn" title="Для каждого материала выбрать дешёвый вариант: строить или купить">⚡ Оптимизировать build/buy</button>
         </div>
         <table class="tree-table">
-          <thead><tr><th>Ресурс</th><th>Кол-во</th><th>Цена/ед.</th><th>Job cost</th><th>Сумма</th><th></th></tr></thead>
+          <thead><tr><th>Ресурс</th><th>Кол-во</th><th>ME</th><th>TE</th><th>Время</th><th>Цена/ед.</th><th>Job cost</th><th>Сумма</th><th></th></tr></thead>
           <tbody id="tree"></tbody>
         </table>
       </div>
@@ -260,24 +287,52 @@
             <h3>Quick Sell <span id="sellLocationLabelQuick" class="sell-location-tag"></span></h3>
             <div class="result-big" id="revenueQuickSell">—</div>
             <div class="result-sub">Продажа в текущий ордер на покупку</div>
+            <div class="result-sub" id="quickSellUnitPriceLine"></div>
             <div class="result-profit" id="profitQuickSell">—</div>
           </div>
           <div class="result-card">
             <h3>Sell (по цене instant buy) <span id="sellLocationLabelSell" class="sell-location-tag"></span></h3>
             <div class="result-big" id="revenueSell">—</div>
             <div class="result-sub">Выставить ордер по текущей мин. цене продажи</div>
+            <div class="result-sub" id="sellUnitPriceLine"></div>
             <div class="result-profit" id="profitSell">—</div>
           </div>
         </div>
-        <p class="hint">Job cost = EIV материалов × (индекс стоимости системы + налог комплекса). Выручка уже учитывает Sales Tax и Broker's Fee — задаются в панели «🏗️ Мои структуры» (по умолчанию 0%, можно подтянуть из аккаунта через EVE SSO или вписать вручную).</p>
+        <p class="hint">Job cost = EIV материалов × (индекс стоимости системы + налог комплекса). Выручка уже учитывает Sales Tax и Broker's Fee — задаются в панели «🏗️ Мои структуры» (по умолчанию ставки необученного персонажа 7.5%/3%, можно подтянуть из аккаунта через EVE SSO или вписать вручную).</p>
 
         <button id="appraiseBtn" class="compare-btn">Открыть все компоненты на appraise.gnf.lt ↗</button>
         <p class="hint" id="appraiseNote"></p>
       </div>
     </div>
+
+    <aside id="blueprintsPanel" class="panel blueprints-panel hidden">
+      <h2>Использованные чертежи</h2>
+      <p class="hint">
+        Для каждого чертежа, который расчёт выше решил СТРОИТЬ, сервер сам нашёл реальный источник и уже включил
+        его в затраты: свой (если вы вошли через EVE SSO) → копия в контрактах → оригинал в контрактах → рынок The
+        Forge, по всему региону (Jita и станции вокруг неё), не только Jita 4-4 — контракты на чертежи достаточно
+        редки, чтобы одна станция теряла реальные предложения. Копия — цена за нужное число ранов (продлевается
+        новой копией, когда раны кончатся); оригинал/рынок — разовая покупка, бесконечно переиспользуется; свой —
+        бесплатно. Материалы и сам конечный продукт по-прежнему считаются только по Jita 4-4. Если чертёж не
+        значится здесь — либо строить его невыгодно, либо для него нигде не нашлось источника, и расчёт выше просто
+        купил готовый предмет.
+      </p>
+      <table class="tree-table">
+        <thead><tr><th>Чертёж</th><th>Ранов нужно</th><th>ME</th><th>Источник</th><th>Стоимость</th></tr></thead>
+        <tbody id="blueprintsBody"></tbody>
+      </table>
+    </aside>
+    </div>
   </main>
 </div>
 
+<script>
+// В публичном режиме прячем всё, что касается личного персонажа.
+fetch("/api/mode")
+  .then((r) => r.json())
+  .then((m) => { if (m && m.public) document.documentElement.classList.add("public-mode"); })
+  .catch(() => {});
+</script>
 <script src="app.js"></script>
 </body>
 </html>
